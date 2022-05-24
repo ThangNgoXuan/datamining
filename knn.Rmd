@@ -1,0 +1,580 @@
+---
+title: "thang"
+author: "Nhóm 6"
+date: '2022-05-07'
+output: html_document
+---
+
+```{r}
+# import thu vien
+library(ggplot2)
+library(class)
+library(gridExtra)
+library(glmnet)
+library(mlbench)
+library(corrplot)
+library(randomForest) 
+```
+
+```{r}
+vin <- read.csv(file = "vin.csv")
+summary(vin)
+str(vin)
+names(vin)
+```
+
+```{r}
+vin2 <- subset(vin, select = -c(giadieuchinh, thaydoi, gtkhoplenh, klthoathuan, gtthoathuan, giathamchieu))
+vin2$date <- as.Date(vin2$date) 
+names(vin2)
+summary(vin2)
+str(vin2)
+```
+
+```{r}
+sum(is.na(vin2))
+```
+
+```{r}
+vin2_split <-  split(vin2, vin2$date > as.Date("2021-05-17"))
+vin2_split$`TRUE`
+
+training <- as.data.frame(vin2_split$`FALSE`)
+test <-  as.data.frame(vin2_split$`TRUE`)
+```
+
+```{r}
+# Danh gia du lieu
+cor(vinstock2[,2:6]) #Correlation matrix
+corrplot(cor(vinstock2[,2:6]),method = "number", order = "hclust")
+```
+
+```{r}
+# bieu do giua ngay va giabinhquan
+ggplot(data = vinstock2, mapping = aes(date, final)) + geom_point() +
+  geom_line() + xlab("Date") + ylab("Gia tri dong cua trung binh") + ggtitle("Gia co phieu Vin") 
+```
+/////////////////////////////
+#KNN
+```{r}
+library(caret)
+# KNN Model 2
+trControl <- trainControl(method = 'repeatedcv',
+                          number = 10,
+                          repeats = 1,
+                          verboseIter = T)
+
+# train model
+set.seed(333)
+knn <- train(adj ~.,
+             data = training,
+             tuneGrid = expand.grid(k=1:70),
+             method = 'knn',
+             metric = 'Rsquared',
+             trControl = trControl,
+             preProc = c('center', 'scale'))
+```
+
+```{r}
+knn
+plot(knn)
+```
+
+
+
+
+
+
+```{r}
+knn_pred <- predict(knn, newdata = test)
+R2_knn = R2(knn_pred,test$adj)
+plot(knn_pred ~ test$adj)
+R2_knn
+C = cbind(test$adj[1:5],knn_pred[1:5])
+newheaders <- c("Actual Values","Predicted Values")
+colnames(C) <- newheaders
+C
+
+```
+
+
+```{r}
+plot_knn = ggplot() + 
+  geom_line(data = test, aes(x = date, y = adj), color = "blue") +
+  geom_line(data = test, aes(x = date, y = knn_pred), color = "red") +
+  xlab('Dates') +
+  ylab('giabinhquan')
+
+print(plot_knn)
+```
+///////////////////////////////////////////////////////////////////////////////////////
+#LinearRegression
+#Train model 
+```{r}
+lm <- lm(adj ~ . , data = training) # ước tính tham số
+summary(lm) 
+coefficients(lm)
+plot(vin2$date,vin2$adj)
+abline(lm, col="red")
+```
+
+#Predict on test data
+```{r}
+lm_pred_vin <- predict(lm, test)
+```
+#R Squared Value
+```{r}
+R2_lr_vin = R2(lm_pred_vin,test$adj)
+R2_lr_vin
+lm_pred_vin
+```
+```{r}
+plot_lm = ggplot() + geom_line(data = test, aes(x = date, y = adj), color = "blue") +
+  geom_line(data = test, aes(x = date, y = lm_pred_vin), color = "red") +
+  xlab('date') +
+  ylab('adj')
+print(plot_lm)
+```
+
+////////////////////////////////////////////////////////////////////////////////////////
+#RidgeRegression
+# Custom Control Parameters
+```{r}
+custom <- trainControl(method = 'repeatedcv',
+                       number = 10 ,
+                       repeats = 3,
+                       verboseIter = T)
+```
+#Train model
+```{r}
+set.seed(1234)
+ridge <- train(adj ~ .,test, method = "glmnet",tuneGrid = expand.grid(alpha = 0,lambda = seq(0.0001,1,length = 100)), trControl = custom)
+```
+```{r}
+ridge
+plot(ridge)
+```
+#Predict on test data
+```{r}
+rr_pred <- predict(ridge, newdata = test)
+```
+#R Squared Value
+```{r}
+R2_rr = R2(rr_pred,test$adj)
+R2_rr
+```
+#Plotting predicted Vs Actual Values
+```{r}
+plot_rr = ggplot() + geom_line(data = test, aes(x = date, y = test$adj), color = "blue") +
+  geom_line(data = test, aes(x = date, y = rr_pred), color = "red") +
+  xlab('date') +
+  ylab('giabinhquan')+ggtitle("Actual vs Predicted for Ridged Regression") 
+
+print(plot_rr)
+```
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+# Randomforest
+#Phân chia dữ liệu
+```{r}
+set.seed(1)
+rf_train=c(1:830) # 
+rf_train
+rf_test=vin2[-rf_train ,"adj"] # test là phần còn lại
+rf_test
+```
+#Train model
+#Using mtry=3
+```{r}
+set.seed(1)
+rf=randomForest(adj~.,data=vin2,subset=rf_train,mtry=3,importance =TRUE)
+```
+
+#Predict on test data
+```{r}
+rf_pred = predict(rf ,newdata=vin2[-rf_train ,])
+mean((rf_pred-rf_test)^2)
+```
+#R Squared Value
+```{r}
+R2_rf = R2(rf_pred,rf_test)
+R2_rf
+```
+#vẽ biểu đồ So sánh giá trị dự đoán và giá trị thực tế
+```{r}
+plot_rf = ggplot() + 
+  geom_line(data = vin2[-rf_train,], aes(x = date, y = rf_test), color = "blue") +
+  geom_line(data = vin2[-rf_train,], aes(x = date, y = rf_pred), color = "red") +
+  xlab('Dates') +
+  ylab('giabinhquan')
+print(plot_rf)
+```
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#DATA khác
+
+
+```{r}
+amzn <- read.csv(file = "amzn.csv")
+goog <- read.csv(file = "goog.csv")
+tsla <- read.csv(file = "tsla.csv")
+nflx <- read.csv(file = "nflx.csv")
+aapl <- read.csv(file = "aapl.csv")
+amzn$date <- as.Date(amzn$date, "%m/%d/%Y")
+goog$date <- as.Date(goog$date, "%m/%d/%Y")
+tsla$date <- as.Date(tsla$date, "%m/%d/%Y")
+nflx$date <- as.Date(nflx$date, "%m/%d/%Y")
+aapl$date <- as.Date(aapl$date, "%m/%d/%Y")
+```
+
+```{r}      
+amzn
+```
+
+```{r}
+#amzn
+amzn_split <-  split(amzn, amzn$date > as.Date("2021-05-17"))
+
+training_amzn <- as.data.frame(amzn_split$`FALSE`)
+test_amzn <-  as.data.frame(amzn_split$`TRUE`)
+
+#goog
+goog_split <-  split(goog, goog$date > as.Date("2021-05-17"))
+training_goog <- as.data.frame(goog_split$`FALSE`)
+test_goog <-  as.data.frame(goog_split$`TRUE`)
+
+#tsla
+
+tsla_split <-  split(tsla, tsla$date > as.Date("2021-05-17"))
+training_tsla <- as.data.frame(tsla_split$`FALSE`)
+test_tsla <-  as.data.frame(tsla_split$`TRUE`)
+
+#nflx
+
+nflx_split <-  split(nflx, nflx$date > as.Date("2021-05-17"))
+training_nflx <- as.data.frame(nflx_split$`FALSE`)
+test_nflx <-  as.data.frame(nflx_split$`TRUE`)
+
+#aapl
+aapl_split <-  split(aapl, aapl$date > as.Date("2021-05-17"))
+training_aapl <- as.data.frame(aapl_split$`FALSE`)
+test_aapl <-  as.data.frame(aapl_split$`TRUE`)
+
+```
+
+```{r}
+library(caret)
+# KNN Model 2
+trControl <- trainControl(method = 'repeatedcv',
+                          number = 10,
+                          repeats = 1,
+                          verboseIter = T)
+
+# train 
+set.seed(333)
+
+knn_amzn <- train(adj ~.,
+             data = training_amzn,
+             tuneGrid = expand.grid(k=1:70),
+             method = 'knn',
+             metric = 'Rsquared',
+             trControl = trControl,
+             preProc = c('center', 'scale'))
+
+
+knn_goog <- train(adj ~.,
+             data = training_goog,
+             tuneGrid = expand.grid(k=1:70),
+             method = 'knn',
+             metric = 'Rsquared',
+             trControl = trControl,
+             preProc = c('center', 'scale'))
+
+
+knn_tsla <- train(adj ~.,
+             data = training_tsla,
+             tuneGrid = expand.grid(k=1:70),
+             method = 'knn',
+             metric = 'Rsquared',
+             trControl = trControl,
+             preProc = c('center', 'scale'))
+
+
+knn_nflx <- train(adj ~.,
+             data = training_nflx,
+             tuneGrid = expand.grid(k=1:70),
+             method = 'knn',
+             metric = 'Rsquared',
+             trControl = trControl,
+             preProc = c('center', 'scale'))
+
+knn_aapl <- train(adj ~.,
+             data = training_aapl,
+             tuneGrid = expand.grid(k=1:70),
+             method = 'knn',
+             metric = 'Rsquared',
+             trControl = trControl,
+             preProc = c('center', 'scale'))
+```
+
+```{r}
+knn_pred_amzn <- predict(knn_amzn, newdata = test_fb)
+R2_knn_amzn = R2(knn_pred_amzn,test_amzn$adj)
+R2_knn_amzn
+
+knn_pred_goog <- predict(knn_goog, newdata = test_goog)
+R2_knn_goog = R2(knn_pred_goog,test_goog$adj)
+R2_knn_goog
+
+knn_pred_tsla <- predict(knn_tsla, newdata = test_tsla)
+R2_knn_tsla = R2(knn_pred_tsla,test_tsla$adj)
+R2_knn_tsla
+
+knn_pred_nflx <- predict(knn_nflx, newdata = test_nflx)
+R2_knn_nflx = R2(knn_pred_nflx,test_nflx$adj)
+R2_knn_nflx
+
+knn_pred_aapl <- predict(knn_aapl, newdata = test_aapl)
+R2_knn_aapl = R2(knn_pred_aapl,test_aapl$adj)
+R2_knn_aapl
+```
+
+/////////////////////////////////////////////////////
+linear 
+
+#LinearRegression
+#Train model 
+```{r}
+lm_aapl <- lm(adj ~ . , data = training_aapl) # ước tính tham số
+
+lm_goog <- lm(adj ~ . , data = training_goog)
+
+lm_amzn <- lm(adj ~ . , data = training_amzn)
+
+lm_nflx <- lm(adj ~ . , data = training_nflx)
+
+lm_tsla <- lm(adj ~ . , data = training_tsla)
+```
+
+#Predict on test data
+```{r}
+lm_pred_aapl <- predict(lm_aapl, test_aapl)
+
+lm_pred_goog <- predict(lm_goog, test_goog)
+
+lm_pred_amzn <- predict(lm_amzn, test_amzn)
+
+lm_pred_nflx <- predict(lm_nflx, test_nflx)
+
+lm_pred_tsla <- predict(lm_tsla, test_tsla)
+```
+#R Squared Value
+```{r}
+R2_lr_aapl = R2(lm_pred_aapl,test_aapl$adj)
+R2_lr_aapl
+
+##
+R2_lr_goog = R2(lm_pred_goog,test_goog$adj)
+R2_lr_goog
+
+##
+R2_lr_amzn = R2(lm_pred_amzn,test_amzn$adj)
+R2_lr_amzn
+
+##
+R2_lr_nflx = R2(lm_pred_nflx,test_nflx$adj)
+R2_lr_nflx
+
+##
+R2_lr_tsla = R2(lm_pred_tsla,test_tsla$adj)
+R2_lr_tsla
+```
+
+# Randomforest
+#Phân chia dữ liệu
+```{r}
+
+rf_aapl_train=c(1:850) # 
+rf_aapl_test=aapl[-rf_aapl_train ,"adj"] # test là phần còn lại
+
+
+rf_amzn_train=c(1:850) # 
+rf_amzn_test=amzn[-rf_amzn_train ,"adj"] # test là phần còn lại
+
+
+rf_goog_train=c(1:850) # 
+rf_goog_test=goog[-rf_goog_train ,"adj"] # test là phần còn lại
+
+
+rf_nflx_train=c(1:850) # 
+rf_nflx_test=nflx[-rf_nflx_train ,"adj"] # test là phần còn lại
+
+
+rf_tsla_train=c(1:850) # 
+rf_tsla_test=tsla[-rf_tsla_train ,"adj"] # test là phần còn lại
+
+
+```
+
+```{r}
+aapl
+```
+
+#Train model
+#Using mtry=3
+```{r}
+
+rf_aapl=randomForest(adj~. ,data=aapl, subset=rf_aapl_train,mtry=3,  importance =TRUE)
+importance(rf_aapl)
+
+
+
+rf_amzn=randomForest(adj~. ,data=amzn, subset=rf_amzn_train,mtry=3, importance =TRUE)
+importance(rf_amzn)
+
+
+
+rf_goog=randomForest(adj~. ,data=goog, subset=rf_goog_train,mtry=3, importance =TRUE)
+importance(rf_goog)
+
+
+
+rf_nflx=randomForest(adj~. ,data=nflx, subset=rf_nflx_train,mtry=3, importance =TRUE)
+importance(rf_nflx)
+
+
+rf_tsla=randomForest(adj~. ,data=tsla, subset=rf_tsla_train, mtry=3, importance =TRUE)
+importance(rf_tsla)
+
+
+```
+
+
+
+#Predict on test data
+```{r}
+rf_aapl_pred = predict(rf_aapl ,newdata=aapl[-rf_aapl_train ,])
+
+
+rf_amzn_pred = predict(rf_amzn ,newdata=amzn[-rf_amzn_train ,])
+
+
+
+rf_goog_pred = predict(rf_goog ,newdata=goog[-rf_goog_train ,])
+
+
+
+rf_nflx_pred = predict(rf_nflx ,newdata=nflx[-rf_nflx_train ,])
+
+
+
+rf_tsla_pred = predict(rf_tsla ,newdata=tsla[-rf_tsla_train ,])
+
+
+```
+#R Squared Value
+```{r}
+R2_rf_aapl = R2(rf_aapl_pred,rf_aapl_test)
+R2_rf_aapl
+
+R2_rf_amzn = R2(rf_amzn_pred,rf_amzn_test)
+R2_rf_amzn
+
+R2_rf_goog = R2(rf_goog_pred,rf_goog_test)
+R2_rf_goog
+
+R2_rf_nflx = R2(rf_nflx_pred,rf_nflx_test)
+R2_rf_nflx
+
+R2_rf_tsla = R2(rf_tsla_pred,rf_tsla_test)
+R2_rf_tsla
+```
+#ride 
+#Split the data into train and test 
+```{r}
+aapl_split <-split(aapl, aapl$date < as.Date("2021-05-17"))
+aapl_split$`FALSE`
+trainingappl <- as.data.frame(aapl_split$`TRUE`)
+testappl <-  as.data.frame(aapl_split$`FALSE`)
+
+amzn_split <-split(amzn, amzn$date < as.Date("2021-05-17"))
+amzn_split$`FALSE`
+trainingamzn <- as.data.frame(amzn_split$`TRUE`)
+testamzn <-  as.data.frame(amzn_split$`FALSE`)
+
+goog_split <-split(goog, goog$date < as.Date("2021-05-17"))
+goog_split$`FALSE`
+traininggoog <- as.data.frame(goog_split$`TRUE`)
+testgoog <-  as.data.frame(goog_split$`FALSE`)
+
+nflx_split <-split(nflx, nflx$date < as.Date("2021-05-17"))
+nflx_split$`FALSE`
+trainingnflx <- as.data.frame(nflx_split$`TRUE`)
+testnflx <-  as.data.frame(nflx_split$`FALSE`)
+
+tsla_split <-split(tsla, tsla$date < as.Date("2021-05-17"))
+tsla_split$`FALSE`
+trainingtsla <- as.data.frame(tsla_split$`TRUE`)
+testtsla <-  as.data.frame(tsla_split$`FALSE`)
+
+```
+#RidgeRegression
+# Custom Control Parameters
+```{r}
+custom <- trainControl(method = 'repeatedcv',
+                       number = 10 ,
+                       repeats = 3,
+                       verboseIter = T)
+```
+#Train model
+```{r}
+set.seed(1234)
+ridge_appl <- train(adj ~ .,data=trainingappl, method = "glmnet",tuneGrid = expand.grid(alpha = 0,lambda = seq(0.0001,1,length = 100)), trControl = custom)
+```
+```{r}
+set.seed(1234)
+ridge_amzn <- train(adj ~ .,data=trainingamzn, method = "glmnet",tuneGrid = expand.grid(alpha = 0,lambda = seq(0.0001,1,length = 100)), trControl = custom)
+
+set.seed(1234)
+ridge_goog <- train(adj ~ .,data=traininggoog, method = "glmnet",tuneGrid = expand.grid(alpha = 0,lambda = seq(0.0001,1,length = 100)), trControl = custom)
+
+set.seed(1234)
+ridge_nflx <- train(adj ~ .,data=trainingnflx, method = "glmnet",tuneGrid = expand.grid(alpha = 0,lambda = seq(0.0001,1,length = 100)), trControl = custom)
+
+set.seed(1234)
+ridge_tsla <- train(adj ~ .,data=trainingtsla, method = "glmnet",tuneGrid = expand.grid(alpha = 0,lambda = seq(0.0001,1,length = 100)), trControl = custom)
+```
+
+```{r}
+rr_pred_appl <- predict(ridge_appl, newdata = testappl)
+rr_pred_amzn <- predict(ridge_amzn, newdata = testamzn)
+rr_pred_goog <- predict(ridge_goog, newdata = testgoog)
+rr_pred_nflx <- predict(ridge_nflx, newdata = testnflx)
+rr_pred_tsla <- predict(ridge_tsla, newdata = testtsla)
+```
+
+#R Squared Value
+```{r}
+R2_rr_appl = R2(rr_pred_appl,testappl$adj)
+R2_rr_appl
+
+R2_rr_amzn = R2(rr_pred_amzn,testamzn$adj)
+R2_rr_amzn
+
+R2_rr_goog = R2(rr_pred_goog,testgoog$adj)
+R2_rr_goog
+
+R2_rr_nflx = R2(rr_pred_nflx,testnflx$adj)
+R2_rr_nflx
+
+R2_rr_tsla = R2(rr_pred_tsla,testtsla$adj)
+R2_rr_tsla
+```
+```{r}
+X <- read.csv("https://drive.google.com/file/d/1eBlJzeAnfelRtweLwoy8MMd0vvpmsl8-/view?usp=sharing")
+```
+
+
+
+
